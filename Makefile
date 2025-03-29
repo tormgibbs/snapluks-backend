@@ -24,6 +24,12 @@ confirm:
 run/api:
 	go run ./cmd/api
 
+## run/api/live: run the cmd/api application with live reload
+.PHONY: run/api/live
+run/api/live:
+	@echo 'Running cmd/api with live reload...'
+	wgo run ./cmd/api
+
 ## db/psql: connect to the database using psql
 .PHONY: db/psql
 db/psql:
