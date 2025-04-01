@@ -38,6 +38,48 @@ func (pm ProviderModel) Insert(p *Provider) error {
 	return pm.DB.QueryRowContext(ctx, query, args...).Scan(&p.ID, &p.CreatedAt, &p.Version)
 }
 
+func (pm ProviderModel) GetAll(name, address string, latitude, longitude float64, filters Filters) ([]*Provider, error) {
+	query := `
+		SELECT id, created_at, name, address, latitude, longitude, version
+		FROM providers
+		ORDER BY id;
+	`
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	rows, err := pm.DB.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var providers []*Provider
+
+	for rows.Next() {
+		var provider Provider
+		err := rows.Scan(
+			&provider.ID,
+			&provider.CreatedAt,
+			&provider.Name,
+			&provider.Address,
+			&provider.Latitude,
+			&provider.Longitude,
+			&provider.Version,
+		)
+		if err != nil {
+			return nil, err
+		}
+		providers = append(providers, &provider)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return providers, nil
+}
+
 func (pm ProviderModel) Get(id int64) (*Provider, error) {
 	if id < 1 {
 		return nil, ErrRecordNotFound
