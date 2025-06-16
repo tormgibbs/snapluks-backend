@@ -63,7 +63,7 @@ func (app *application) readInt(qs url.Values, key string, defaultValue int, v *
 	return i
 }
 
-func (app *application) readFloat(qs url.Values, key string, defaultValue float64, v *validator.Validator) float64 {
+func (app *application) readFloat(qs url.Values, key string, defaultValue *float64, v *validator.Validator) *float64 {
 	s := qs.Get(key)
 
 	if s == "" {
@@ -76,7 +76,7 @@ func (app *application) readFloat(qs url.Values, key string, defaultValue float6
 		return defaultValue
 	}
 
-	return f
+	return &f
 }
 
 func (app *application) writeJSON(w http.ResponseWriter, status int, data envelope, headers http.Header) error {

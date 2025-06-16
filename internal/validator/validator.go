@@ -1,12 +1,14 @@
 package validator
 
 import (
+	"net/url"
 	"regexp"
 	"slices"
 )
 
 var (
 	EmailRX = regexp.MustCompile(`^[a-zA-Z0-9.!#$%&'*+\/=?^_` + "`" + `{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$`)
+	PhoneRX = regexp.MustCompile(`^[0-9]{10}$`)
 )
 
 type Validator struct {
@@ -35,6 +37,11 @@ func (v *Validator) Check(ok bool, key string, msg string) {
 
 func In(value string, list ...string) bool {
 	return slices.Contains(list, value)
+}
+
+func IsURL(value string) bool {
+	parsed, err := url.ParseRequestURI(value)
+	return err == nil && parsed.Scheme != "" && parsed.Host != ""
 }
 
 func Matches(value string, rx *regexp.Regexp) bool {
