@@ -80,20 +80,19 @@ func (app *application) readFloat(qs url.Values, key string, defaultValue *float
 }
 
 func (app *application) writeJSON(w http.ResponseWriter, status int, data envelope, headers http.Header) error {
-	js, err := json.MarshalIndent(data, "", "\t")
-	if err != nil {
-		return err
-	}
-
-	js = append(js, '\n')
-
 	for key, value := range headers {
 		w.Header()[key] = value
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	w.Write(js)
+
+	encoder := json.NewEncoder(w)
+	encoder.SetIndent("", "\t")
+
+	if err := encoder.Encode(data); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -107,9 +106,11 @@ func (app *application) readJSON(w http.ResponseWriter, r *http.Request, v inter
 
 	err := dec.Decode(v)
 	if err != nil {
-		var syntaxError *json.SyntaxError
-		var unmarshalTypeError *json.UnmarshalTypeError
-		var invalidUnmarshalError *json.InvalidUnmarshalError
+		var (
+			syntaxError           *json.SyntaxError
+			unmarshalTypeError    *json.UnmarshalTypeError
+			invalidUnmarshalError *json.InvalidUnmarshalError
+		)
 
 		switch {
 		case errors.As(err, &syntaxError):
@@ -142,10 +143,22 @@ func (app *application) readJSON(w http.ResponseWriter, r *http.Request, v inter
 		}
 	}
 
-	err = dec.Decode(&struct{}{})
-	if err != io.EOF {
+	if dec.More() {
 		return errors.New("body must only contain a single JSON value")
 	}
 
 	return nil
+}
+
+func (app *application) background(fn func()) {
+	app.wg.Add(1)
+	go func() {
+		defer func() {
+			defer app.wg.Done()
+			if err := recover(); err != nil {
+				app.logger.PrintError(fmt.Errorf("%s", err), nil)
+			}
+		}()
+		fn()
+	}()
 }

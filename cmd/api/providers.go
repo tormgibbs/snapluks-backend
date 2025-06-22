@@ -41,7 +41,7 @@ func (app *application) createProviderHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	err = app.models.Providers.Create(provider, user.FirstName)
+	err = app.models.Providers.Create(provider, "user.FirstName")
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return

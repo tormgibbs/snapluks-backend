@@ -62,7 +62,7 @@ func (app *application) authenticate(next http.HandlerFunc) http.HandlerFunc {
 		v := validator.New()
 
 		// Validate the token format (this only checks the structure, not whether the token is valid).
-		if data.ValidateTokenPlaintext(v, token); !v.Valid() {
+		if data.ValidateTokenPlaintext(v, token, data.ScopeAuthentication); !v.Valid() {
 			app.invalidAuthenticationTokenResponse(w, r)
 			return
 		}

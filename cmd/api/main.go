@@ -3,11 +3,14 @@ package main
 import (
 	"context"
 	"database/sql"
-	"flag"
 	"fmt"
+	"github.com/joho/godotenv"
+	"github.com/tormgibbs/snapluks-backend/internal/mailer"
 	"log"
 	"net/http"
 	"os"
+	"strconv"
+	"sync"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -27,36 +30,25 @@ type config struct {
 		maxIdleConns int
 		maxIdleTime  string
 	}
+	smtp struct {
+		host   string
+		port   int
+		user   string
+		pass   string
+		sender string
+	}
 }
 
 type application struct {
 	config config
 	logger *jsonlog.Logger
+	mailer mailer.Mailer
 	models data.Models
+	wg     sync.WaitGroup
 }
 
 func main() {
-	var cfg config
-
-	dsn := getDSN()
-
-	flag.IntVar(&cfg.port, "port", 4000, "API server port")
-	flag.StringVar(
-		&cfg.env, "env", "development", "Environment (development|staging|production)",
-	)
-	flag.StringVar(
-		&cfg.db.dsn, "db-dsn", dsn, "PostgreSQL DSN",
-	)
-	flag.IntVar(
-		&cfg.db.maxOpenConns, "db-max-open-conns", 25, "PostgreSQL max open connections",
-	)
-	flag.IntVar(
-		&cfg.db.maxIdleConns, "db-max-idle-conns", 25, "PostgreSQL max idle connections",
-	)
-	flag.StringVar(
-		&cfg.db.maxIdleTime, "db-max-idle-time", "15m", "PostgreSQL max connection idle time",
-	)
-	flag.Parse()
+	cfg := loadConfig()
 
 	logger := jsonlog.New(os.Stdout, jsonlog.LevelInfo)
 
@@ -72,6 +64,7 @@ func main() {
 		config: cfg,
 		logger: logger,
 		models: data.NewModels(db),
+		mailer: mailer.New(cfg.smtp.host, cfg.smtp.port, cfg.smtp.user, cfg.smtp.pass, cfg.smtp.sender),
 	}
 
 	mux := http.NewServeMux()
@@ -121,10 +114,47 @@ func openDB(cfg config) (*sql.DB, error) {
 	return db, nil
 }
 
-func getDSN() string {
-	dsn := os.Getenv("DB_DSN")
-	if dsn == "" {
-		panic(fmt.Errorf("DB_DSN missing from .env"))
+func loadConfig() config {
+	_ = godotenv.Load()
+
+	getEnv := func(key, fallback string) string {
+		val := os.Getenv(key)
+		if val == "" {
+			return fallback
+		}
+		return val
 	}
-	return dsn
+
+	mustGetEnv := func(key string) string {
+		val := os.Getenv(key)
+		if val == "" {
+			log.Fatalf("environment variable %s is required but not set", key)
+		}
+		return val
+	}
+
+	atoi := func(s string, fallback int) int {
+		i, err := strconv.Atoi(s)
+		if err != nil {
+			return fallback
+		}
+		return i
+	}
+
+	cfg := config{}
+	cfg.port = atoi(getEnv("PORT", "4000"), 4000)
+	cfg.env = getEnv("ENV", "development")
+
+	cfg.db.dsn = mustGetEnv("DB_DSN")
+	cfg.db.maxOpenConns = atoi(getEnv("DB_MAX_OPEN_CONNS", "25"), 25)
+	cfg.db.maxIdleConns = atoi(getEnv("DB_MAX_IDLE_CONNS", "25"), 25)
+	cfg.db.maxIdleTime = getEnv("DB_MAX_IDLE_TIME", "15m")
+
+	cfg.smtp.host = mustGetEnv("SMTP_HOST")
+	cfg.smtp.port = atoi(getEnv("SMTP_PORT", "587"), 587)
+	cfg.smtp.user = mustGetEnv("SMTP_USER")
+	cfg.smtp.pass = mustGetEnv("SMTP_PASS")
+	cfg.smtp.sender = mustGetEnv("SMTP_SENDER")
+
+	return cfg
 }

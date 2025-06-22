@@ -8,7 +8,7 @@ import (
 	"github.com/tormgibbs/snapluks-backend/internal/validator"
 )
 
-func (app *application) registerUserHandler(w http.ResponseWriter, r *http.Request) {
+func (app *application) _registerUserHandler(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		FirstName   string `json:"first_name"`
 		LastName    string `json:"last_name"`
@@ -25,12 +25,12 @@ func (app *application) registerUserHandler(w http.ResponseWriter, r *http.Reque
 	}
 
 	user := &data.User{
-		FirstName:   input.FirstName,
-		LastName:    input.LastName,
-		PhoneNumber: input.PhoneNumber,
+		FirstName:   data.StringToNullString(input.FirstName),
+		LastName:    data.StringToNullString(input.LastName),
+		PhoneNumber: data.StringToNullString(input.PhoneNumber),
 		Email:       input.Email,
 		Role:        data.Role(input.Role),
-		Activated:   false,
+		Activated:   true,
 	}
 
 	err = user.Password.Set(input.Password)

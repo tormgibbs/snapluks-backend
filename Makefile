@@ -38,8 +38,10 @@ db/psql:
 ## db/migrations/new name=$1: create a new database migration
 .PHONY: db/migrations/new
 db/migrations/new:
-	@echo 'creating migration files for ${name}...'
-	@if [ -z "${name}" ]; then echo "Error: name is required"; exit 1; fi
+ifndef name
+	$(error NAME is not set. Usage: make db/migrations/new name=your_migration_name)
+endif
+	@echo 'creating migration files for $(name)...'
 	@migrate create -ext sql -dir ./migrations -seq ${name}
 
 ## db/migrations/up: apply all up database migrations
@@ -77,4 +79,3 @@ endif
 	@echo "Migrating to version $(version)..."
 	@migrate -path ./migrations -database $(DB_DSN) goto $(version)
 
-# 129

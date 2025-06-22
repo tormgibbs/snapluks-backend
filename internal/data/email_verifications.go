@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/base32"
+	"errors"
 	"time"
 
 	"github.com/tormgibbs/snapluks-backend/internal/validator"
@@ -87,10 +88,10 @@ func (m EmailVerificationTokenModel) Verify(tokenPlaintext string) (string, erro
 	var email string
 	err := m.DB.QueryRowContext(ctx, query, args...).Scan(&email)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return "", ErrRecordNotFound
 		}
-		return "", nil
+		return "", err
 	}
 
 	return email, nil

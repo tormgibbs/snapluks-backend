@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -39,14 +38,14 @@ type Client struct {
 }
 
 type User struct {
-	ID          int      `json:"id"`
-	Email       string   `json:"email"`
-	FirstName   string   `json:"first_name"`
-	LastName    string   `json:"last_name"`
-	PhoneNumber string   `json:"phone_number,omitempty"`
-	Password    password `json:"-"`
-	Activated   bool     `json:"active"`
-	Role        Role     `json:"role"`
+	ID          int            `json:"id"`
+	Email       string         `json:"email"`
+	FirstName   sql.NullString `json:"first_name,omitempty"`
+	LastName    sql.NullString `json:"last_name,omitempty"`
+	PhoneNumber sql.NullString `json:"phone_number,omitempty"`
+	Password    password       `json:"-"`
+	Activated   bool           `json:"activated"`
+	Role        Role           `json:"role,omitempty"`
 }
 
 func (p *password) Set(plaintextPassword string) error {
@@ -86,11 +85,11 @@ func ValidatePasswordPlaintext(v *validator.Validator, password string) {
 }
 
 func ValidateUser(v *validator.Validator, user *User) {
-	v.Check(user.FirstName != "", "first_name", "must be provided")
-	v.Check(len(user.FirstName) <= 500, "first_name", "must not be more than 500 bytes long")
+	v.Check(user.FirstName.Valid && user.FirstName.String != "", "first_name", "must be provided")
+	v.Check(user.FirstName.Valid || len(user.FirstName.String) <= 500, "first_name", "must not be more than 500 bytes long")
 
-	v.Check(user.LastName != "", "last_name", "must be provided")
-	v.Check(len(user.LastName) <= 500, "last_name", "must not be more than 500 bytes long")
+	v.Check(user.LastName.Valid && user.LastName.String != "", "last_name", "must be provided")
+	v.Check(!user.LastName.Valid || len(user.LastName.String) <= 500, "last_name", "must not be more than 500 bytes long")
 
 	ValidateEmail(v, user.Email)
 
@@ -100,9 +99,6 @@ func ValidateUser(v *validator.Validator, user *User) {
 
 	roles := []string{string(RoleClient), string(RoleProvider)}
 	role := string(user.Role)
-
-	fmt.Println("roles:", roles)
-	fmt.Println("role:", role)
 
 	v.Check(role != "", "role", "must be provided")
 	v.Check(validator.In(role, roles...), "role", "invalid role value")
@@ -139,16 +135,39 @@ func (m UserModel) Insert(u *User) error {
 			switch {
 			case pgErr.Code == "23505" && pgErr.ConstraintName == "users_email_key":
 				return ErrDuplicateEmail
+			default:
+				return err
 			}
 		}
-		return fmt.Errorf("inserting user: %w", err)
 	}
+	return nil
+}
 
+func (m UserModel) InsertInitial(u *User) error {
+	query := `
+		INSERT INTO users (email)
+		VALUES ($1)
+		RETURNING id, email, activated;
+	`
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	err := m.DB.QueryRowContext(ctx, query, u.Email).Scan(&u.ID, &u.Email, &u.Activated)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) {
+			switch {
+			case pgErr.Code == "23505" && pgErr.ConstraintName == "users_email_key":
+				return ErrDuplicateEmail
+			default:
+				return err
+			}
+		}
+	}
 	return nil
 }
 
 func (m UserModel) GetForToken(tokenScope, tokenPlaintext string) (*User, error) {
-	// Hash the plaintext
 	tokenHash := sha256.Sum256([]byte(tokenPlaintext))
 
 	query := `
@@ -190,7 +209,7 @@ func (m UserModel) GetForToken(tokenScope, tokenPlaintext string) (*User, error)
 
 func (m UserModel) GetByEmail(email string) (*User, error) {
 	query := `
-		SELECT id, email, first_name, last_name, password_hash, activated
+		SELECT id, email, first_name, last_name, password_hash, activated, role
 		FROM users
 		where email = $1`
 
@@ -206,6 +225,7 @@ func (m UserModel) GetByEmail(email string) (*User, error) {
 		&user.LastName,
 		&user.Password.hash,
 		&user.Activated,
+		&user.Role,
 	)
 
 	if err != nil {
@@ -218,4 +238,30 @@ func (m UserModel) GetByEmail(email string) (*User, error) {
 	}
 
 	return &user, nil
+}
+
+func (m UserModel) Update(user *User) error {
+	query := `
+		UPDATE users 
+		SET first_name = $1, last_name = $2, phone_number = $3, password_hash = $4, activated = $5, role = $6
+		WHERE id = $7
+	`
+	args := []any{
+		user.FirstName,
+		user.LastName,
+		user.PhoneNumber,
+		user.Password.hash,
+		user.Activated,
+		user.Role,
+		user.ID,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	_, err := m.DB.ExecContext(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	return nil
 }
