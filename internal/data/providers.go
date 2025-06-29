@@ -3,6 +3,7 @@ package data
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -14,10 +15,11 @@ type ProviderModel struct {
 }
 
 type Provider struct {
-	ID          int     `json:"id"`
-	UserID      int     `json:"user_id"`
-	TypeID      int     `json:"type_id"`
+	ID          int64   `json:"id"`
+	UserID      int64   `json:"user_id"`
+	TypeID      int64   `json:"type_id"`
 	Name        string  `json:"name"`
+	Email       string  `json:"email"`
 	Description string  `json:"description,omitempty"`
 	PhoneNumber string  `json:"phone_number,omitempty"`
 	Latitude    float64 `json:"latitude,omitempty"`
@@ -34,36 +36,14 @@ func ValidateProvider(v *validator.Validator, p *Provider) {
 	v.Check(p.UserID > 0, "user_id", "must be provided and greater than zero")
 	v.Check(p.TypeID > 0, "type_id", "must be provided and greater than zero")
 
-	v.Check(p.Address != "", "address", "must be provided")
-	v.Check(len(p.Address) <= 500, "address", "must not be more than 500 bytes long")
+	ValidateEmail(v, p.Email)
+	ValidatePhone(v, p.PhoneNumber)
+
+	v.Check(p.Description != "", "description", "must be provided")
+	v.Check(len(p.Description) <= 10000, "description", "must be not be more than 10000 bytes long")
 }
 
-func (m ProviderModel) Insert(p *Provider) error {
-	query := `
-		INSERT INTO providers (user_id, name, provider_type_id, address)
-		VALUES ($1, $2, $3, $4)
-		RETURNING id;
-	`
-
-	args := []any{
-		p.UserID,
-		p.Name,
-		p.TypeID,
-		p.Address,
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-
-	err := m.DB.QueryRowContext(ctx, query, args...).Scan(&p.ID)
-	if err != nil {
-		return fmt.Errorf("inserting provider: %w", err)
-	}
-
-	return nil
-}
-
-func (m *ProviderModel) Create(p *Provider, ownerName string) error {
+func (m *ProviderModel) Insert(p *Provider, u *User) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
@@ -84,10 +64,9 @@ func (m *ProviderModel) Create(p *Provider, ownerName string) error {
 		}
 	}()
 
-	// Insert provider
 	query := `
-		INSERT INTO providers (user_id, name, provider_type_id, address)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO providers (user_id, name, provider_type_id, phone_number, description)
+		VALUES ($1, $2, $3, $4, $5)
 		RETURNING id;
 	`
 
@@ -95,7 +74,8 @@ func (m *ProviderModel) Create(p *Provider, ownerName string) error {
 		p.UserID,
 		p.Name,
 		p.TypeID,
-		p.Address,
+		p.PhoneNumber,
+		p.Description,
 	}
 
 	err = tx.QueryRowContext(ctx, query, args...).Scan(&p.ID)
@@ -105,14 +85,50 @@ func (m *ProviderModel) Create(p *Provider, ownerName string) error {
 
 	// Insert staff (owner)
 	query = `
-		INSERT INTO staff (provider_id, name, is_owner)
-		VALUES ($1, $2, true);
+		INSERT INTO staff (provider_id, phone, name, email, is_owner)
+		VALUES ($1, $2, $3, $4, true);
 	`
+	args = []any{
+		p.ID,
+		u.PhoneNumber,
+		u.FirstName,
+		u.Email,
+	}
 
-	_, err = tx.ExecContext(ctx, query, p.ID, ownerName)
+	_, err = tx.ExecContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("inserting staff: %w", err)
 	}
 
 	return nil
+}
+
+func (m ProviderModel) GetByUserID(userID int64) (*Provider, error) {
+	query := `
+		SELECT id, name, phone_number, description
+		FROM providers
+		WHERE user_id = $1
+	`
+	var provider Provider
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	err := m.DB.QueryRowContext(ctx, query, userID).Scan(
+		&provider.ID,
+		&provider.Name,
+		&provider.PhoneNumber,
+		&provider.Description,
+	)
+
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return nil, ErrRecordNotFound
+		default:
+			return nil, err
+		}
+	}
+
+	return &provider, nil
 }

@@ -22,6 +22,7 @@ CREATE TABLE providers (
 	id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
 	user_id INT UNIQUE NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 	provider_type_id INT NOT NULL REFERENCES provider_types(id) ON DELETE RESTRICT,
+	phone_number TEXT,
 	name TEXT NOT NULL,
 	description TEXT,
 	latitude DOUBLE PRECISION,

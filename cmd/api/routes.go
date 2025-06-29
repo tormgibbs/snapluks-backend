@@ -19,7 +19,10 @@ func (app *application) routes() *httprouter.Router {
 	router.HandlerFunc(http.MethodPost, "/api/v1/auth/login", app.loginHandler)
 
 	router.HandlerFunc(http.MethodPost, "/api/v1/providers", app.authenticate(app.createProviderHandler))
-	// router.HandlerFunc(http.MethodGet, "/api/v1/appointments")
+
+	router.HandlerFunc(http.MethodPost, "/api/v1/categories", app.authenticate(app.createCategoryHandler))
+
+	router.HandlerFunc(http.MethodPost, "/api/v1/services", app.authenticate(app.createServiceHandler))
 
 	return router
 }

@@ -25,9 +25,9 @@ func (app *application) _registerUserHandler(w http.ResponseWriter, r *http.Requ
 	}
 
 	user := &data.User{
-		FirstName:   data.StringToNullString(input.FirstName),
-		LastName:    data.StringToNullString(input.LastName),
-		PhoneNumber: data.StringToNullString(input.PhoneNumber),
+		FirstName:   &input.FirstName,
+		LastName:    &input.LastName,
+		PhoneNumber: &input.PhoneNumber,
 		Email:       input.Email,
 		Role:        data.Role(input.Role),
 		Activated:   true,

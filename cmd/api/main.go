@@ -3,15 +3,17 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
-	"github.com/joho/godotenv"
-	"github.com/tormgibbs/snapluks-backend/internal/mailer"
 	"log"
 	"net/http"
 	"os"
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/joho/godotenv"
+	"github.com/tormgibbs/snapluks-backend/internal/mailer"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "github.com/joho/godotenv/autoload"
@@ -117,6 +119,8 @@ func openDB(cfg config) (*sql.DB, error) {
 func loadConfig() config {
 	_ = godotenv.Load()
 
+	configErrors := make([]error, 0)
+
 	getEnv := func(key, fallback string) string {
 		val := os.Getenv(key)
 		if val == "" {
@@ -128,7 +132,8 @@ func loadConfig() config {
 	mustGetEnv := func(key string) string {
 		val := os.Getenv(key)
 		if val == "" {
-			log.Fatalf("environment variable %s is required but not set", key)
+			configErrors = append(configErrors, fmt.Errorf("environment variable %s is required but not set", key))
+			return ""
 		}
 		return val
 	}
@@ -155,6 +160,11 @@ func loadConfig() config {
 	cfg.smtp.user = mustGetEnv("SMTP_USER")
 	cfg.smtp.pass = mustGetEnv("SMTP_PASS")
 	cfg.smtp.sender = mustGetEnv("SMTP_SENDER")
+
+	if len(configErrors) > 0 {
+		fmt.Println(errors.Join(configErrors...))
+		os.Exit(1)
+	}
 
 	return cfg
 }

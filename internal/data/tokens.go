@@ -21,7 +21,7 @@ const (
 type Token struct {
 	Plaintext string    `json:"token"`
 	Hash      []byte    `json:"-"`
-	UserID    int       `json:"-"`
+	UserID    int64       `json:"-"`
 	Expiry    time.Time `json:"expiry"`
 	Scope     string    `json:"-"`
 }
@@ -30,7 +30,7 @@ type TokenModel struct {
 	DB *sql.DB
 }
 
-func generateToken(userID int, ttl time.Duration, scope string) (*Token, error) {
+func generateToken(userID int64, ttl time.Duration, scope string) (*Token, error) {
 	token := &Token{
 		UserID: userID,
 		Expiry: time.Now().Add(ttl),
@@ -66,6 +66,7 @@ func generateToken(userID int, ttl time.Duration, scope string) (*Token, error) 
 }
 
 func ValidateTokenPlaintext(v *validator.Validator, tokenPlaintext string, scope string) {
+
 	v.Check(tokenPlaintext != "", "token", "must be provided")
 
 	switch scope {
@@ -76,8 +77,7 @@ func ValidateTokenPlaintext(v *validator.Validator, tokenPlaintext string, scope
 	}
 }
 
-
-func (m TokenModel) New(userID int, ttl time.Duration, scope string) (*Token, error) {
+func (m TokenModel) New(userID int64, ttl time.Duration, scope string) (*Token, error) {
 	token, err := generateToken(userID, ttl, scope)
 	if err != nil {
 		return nil, err
@@ -102,7 +102,7 @@ func (m TokenModel) Insert(token *Token) error {
 	return err
 }
 
-func (m TokenModel) DeleteAllForUser(userID int, scope string) error {
+func (m TokenModel) DeleteAllForUser(userID int64, scope string) error {
 	query := `
 		DELETE FROM tokens
 		where scope = $1 and user_id = $2

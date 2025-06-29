@@ -16,10 +16,6 @@ type UserModel struct {
 	DB *sql.DB
 }
 
-var (
-	ErrDuplicateEmail = errors.New("duplicate email")
-)
-
 type Role string
 
 const (
@@ -38,14 +34,14 @@ type Client struct {
 }
 
 type User struct {
-	ID          int            `json:"id"`
-	Email       string         `json:"email"`
-	FirstName   sql.NullString `json:"first_name,omitempty"`
-	LastName    sql.NullString `json:"last_name,omitempty"`
-	PhoneNumber sql.NullString `json:"phone_number,omitempty"`
-	Password    password       `json:"-"`
-	Activated   bool           `json:"activated"`
-	Role        Role           `json:"role,omitempty"`
+	ID          int64    `json:"id"`
+	Email       string   `json:"email"`
+	FirstName   *string  `json:"first_name,omitempty"`
+	LastName    *string  `json:"last_name,omitempty"`
+	PhoneNumber *string  `json:"phone_number,omitempty"`
+	Password    password `json:"-"`
+	Activated   bool     `json:"activated"`
+	Role        Role     `json:"role,omitempty"`
 }
 
 func (p *password) Set(plaintextPassword string) error {
@@ -78,6 +74,19 @@ func ValidateEmail(v *validator.Validator, email string) {
 	v.Check(validator.Matches(email, validator.EmailRX), "email", "must be a valid email address")
 }
 
+func ValidatePhone(v *validator.Validator, phone string) {
+	v.Check(phone != "", "phone_number", "must be provided")
+	v.Check(validator.Matches(phone, validator.PhoneRX), "phone_number", "must be a valid phone number")
+}
+
+func ValidateRole(v *validator.Validator, r Role) {
+	roles := []string{string(RoleClient), string(RoleProvider)}
+	role := string(r)
+
+	v.Check(role != "", "role", "must be provided")
+	v.Check(validator.In(role, roles...), "role", "invalid role value")
+}
+
 func ValidatePasswordPlaintext(v *validator.Validator, password string) {
 	v.Check(password != "", "password", "must be provided")
 	v.Check(len(password) >= 8, "password", "must be at least 8 bytes long")
@@ -85,23 +94,21 @@ func ValidatePasswordPlaintext(v *validator.Validator, password string) {
 }
 
 func ValidateUser(v *validator.Validator, user *User) {
-	v.Check(user.FirstName.Valid && user.FirstName.String != "", "first_name", "must be provided")
-	v.Check(user.FirstName.Valid || len(user.FirstName.String) <= 500, "first_name", "must not be more than 500 bytes long")
+	v.Check(user.FirstName != nil && *user.FirstName != "", "first_name", "must be provided")
+	v.Check(user.FirstName == nil || len(*user.FirstName) <= 500, "first_name", "must not be more than 500 bytes long")
 
-	v.Check(user.LastName.Valid && user.LastName.String != "", "last_name", "must be provided")
-	v.Check(!user.LastName.Valid || len(user.LastName.String) <= 500, "last_name", "must not be more than 500 bytes long")
+	v.Check(user.LastName != nil && *user.LastName != "", "last_name", "must be provided")
+	v.Check(user.LastName == nil || len(*user.LastName) <= 500, "last_name", "must not be more than 500 bytes long")
 
 	ValidateEmail(v, user.Email)
+
+	ValidatePhone(v, *user.PhoneNumber)
+
+	ValidateRole(v, user.Role)
 
 	if user.Password.plaintext != nil {
 		ValidatePasswordPlaintext(v, *user.Password.plaintext)
 	}
-
-	roles := []string{string(RoleClient), string(RoleProvider)}
-	role := string(user.Role)
-
-	v.Check(role != "", "role", "must be provided")
-	v.Check(validator.In(role, roles...), "role", "invalid role value")
 
 	if user.Password.hash == nil {
 		panic("missing password hash for user")
@@ -171,7 +178,7 @@ func (m UserModel) GetForToken(tokenScope, tokenPlaintext string) (*User, error)
 	tokenHash := sha256.Sum256([]byte(tokenPlaintext))
 
 	query := `
-		SELECT users.id, users.first_name, users.last_name, users.email, users.role, users.password_hash, users.activated
+		SELECT users.id, users.first_name, users.last_name, users.email, users.phone_number, users.role, users.password_hash, users.activated
 		FROM users
 		INNER JOIN tokens
 		ON users.id = tokens.user_id
@@ -191,6 +198,7 @@ func (m UserModel) GetForToken(tokenScope, tokenPlaintext string) (*User, error)
 		&user.FirstName,
 		&user.LastName,
 		&user.Email,
+		&user.PhoneNumber,
 		&user.Role,
 		&user.Password.hash,
 		&user.Activated,

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"net/http"
 
 	"github.com/tormgibbs/snapluks-backend/internal/data"
@@ -12,14 +11,15 @@ func (app *application) createProviderHandler(w http.ResponseWriter, r *http.Req
 	user := app.contextGetUser(r)
 
 	if user.Role != data.RoleProvider {
-		fmt.Println("user role:", user.Role)
 		app.notPermittedResponse(w, r)
 		return
 	}
 
 	var input struct {
-		Name    string `json:"name"`
-		Address string `json:"address"`
+		Name        string `json:"name"`
+		Email       string `json:"email"`
+		PhoneNumber string `json:"phone_number"`
+		Description string `json:"description"`
 	}
 
 	err := app.readJSON(w, r, &input)
@@ -29,10 +29,12 @@ func (app *application) createProviderHandler(w http.ResponseWriter, r *http.Req
 	}
 
 	provider := &data.Provider{
-		TypeID:  1,
-		UserID:  user.ID,
-		Name:    input.Name,
-		Address: input.Address,
+		TypeID:      1,
+		UserID:      user.ID,
+		Name:        input.Name,
+		Email:       input.Email,
+		PhoneNumber: input.PhoneNumber,
+		Description: input.Description,
 	}
 
 	v := validator.New()
@@ -41,7 +43,7 @@ func (app *application) createProviderHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	err = app.models.Providers.Create(provider, "user.FirstName")
+	err = app.models.Providers.Insert(provider, user)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return

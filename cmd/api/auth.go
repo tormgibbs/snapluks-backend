@@ -63,7 +63,7 @@ func (app *application) registerUserHandler(w http.ResponseWriter, r *http.Reque
 		},
 	)
 
-	err = app.writeJSON(w, http.StatusAccepted, envelope{"user": user}, nil)
+	err = app.writeJSON(w, http.StatusCreated, envelope{"user": user}, nil)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 	}
@@ -193,7 +193,75 @@ func (app *application) resendVerificationHandler(w http.ResponseWriter, r *http
 }
 
 func (app *application) completeProfileHandler(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Email       string `json:"email"`
+		FirstName   string `json:"first_name"`
+		LastName    string `json:"last_name"`
+		PhoneNumber string `json:"phone_number"`
+		Password    string `json:"password"`
+		Role        string `json:"role"`
+	}
 
+	err := app.readJSON(w, r, &input)
+	if err != nil {
+		app.badRequestResponse(w, r, err)
+		return
+	}
+
+	u := &data.User{
+		Email:       input.Email,
+		FirstName:   &input.FirstName,
+		LastName:    &input.LastName,
+		PhoneNumber: &input.PhoneNumber,
+		Role:        data.Role(input.Role),
+	}
+
+	err = u.Password.Set(input.Password)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
+
+	v := validator.New()
+
+	if data.ValidateUser(v, u); !v.Valid() {
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+
+	user, err := app.models.Users.GetByEmail(input.Email)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrRecordNotFound):
+			v.AddError("email", "no matching email address found")
+			app.failedValidationResponse(w, r, v.Errors)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+
+	if !user.Activated {
+		app.inactiveAccountResponse(w, r)
+		return
+	}
+
+	user.FirstName = u.FirstName
+	user.LastName = u.LastName
+	user.PhoneNumber = u.PhoneNumber
+	user.Password = u.Password
+	user.Role = u.Role
+
+	err = app.models.Users.Update(user)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
+
+	err = app.writeJSON(w, http.StatusAccepted, envelope{"user": user}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
 }
 
 func (app *application) loginHandler(w http.ResponseWriter, r *http.Request) {
@@ -229,13 +297,17 @@ func (app *application) loginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !user.Activated {
+		app.inactiveAccountResponse(w, r)
+		return
+	}
+
 	match, err := user.Password.Matches(input.Password)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
 	}
 
-	// If the password doesn't match, respond with invalid credentials.
 	if !match {
 		app.invalidCredentialsResponse(w, r)
 		return
@@ -247,7 +319,6 @@ func (app *application) loginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Respond with the generated authentication token in JSON format.
 	err = app.writeJSON(w, http.StatusCreated, envelope{"authentication_token": token}, nil)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)

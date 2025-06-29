@@ -7,8 +7,9 @@ import (
 )
 
 var (
-	EmailRX = regexp.MustCompile(`^[a-zA-Z0-9.!#$%&'*+\/=?^_` + "`" + `{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$`)
-	PhoneRX = regexp.MustCompile(`^[0-9]{10}$`)
+	EmailRX    = regexp.MustCompile(`^[a-zA-Z0-9.!#$%&'*+\/=?^_` + "`" + `{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$`)
+	PhoneRX    = regexp.MustCompile(`^[0-9]{10}$`)
+	CategoryRX = regexp.MustCompile(`^[a-zA-Z0-9 ]+$`)
 )
 
 type Validator struct {
@@ -56,4 +57,27 @@ func Unique(values []string) bool {
 	}
 
 	return len(values) == len(uniqueValues)
+}
+
+func HasDuplicates[T comparable](slice []T) bool {
+	seen := make(map[T]struct{})
+	for _, v := range slice {
+		if _, ok := seen[v]; ok {
+			return true
+		}
+		seen[v] = struct{}{}
+	}
+	return false
+}
+
+func Dedupe[T comparable](slice []T) []T {
+	seen := make(map[T]struct{})
+	result := make([]T, 0, len(slice))
+	for _, v := range slice {
+		if _, ok := seen[v]; !ok {
+			seen[v] = struct{}{}
+			result = append(result, v)
+		}
+	}
+	return result
 }
