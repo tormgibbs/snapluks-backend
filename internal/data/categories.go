@@ -3,14 +3,11 @@ package data
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/tormgibbs/snapluks-backend/internal/validator"
 )
-
-var ErrDuplicateCategory = errors.New("category already exists")
 
 type CategoryModel struct {
 	DB *sql.DB
@@ -41,7 +38,7 @@ func (m CategoryModel) Insert(c *Category) error {
 	if err != nil {
 		if pgErr, ok := err.(*pgconn.PgError); ok {
 			if pgErr.Code == "23505" {
-				return ErrDuplicateCategory
+				return ErrDuplicateRecord
 			}
 		}
 		return err

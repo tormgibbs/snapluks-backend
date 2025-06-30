@@ -3,11 +3,19 @@ package data
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/tormgibbs/snapluks-backend/internal/validator"
+)
+
+var (
+	ErrDuplicateService = errors.New("service already exists")
+	ErrCategoryNotFound = errors.New("category not found")
+	ErrStaffNotFound    = errors.New("staff not found")
 )
 
 type ServiceModel struct {
@@ -98,27 +106,36 @@ func (m ServiceModel) Insert(s *Service) (err error) {
 
 	err = tx.QueryRowContext(ctx, query, args...).Scan(&s.ID)
 	if err != nil {
+		if pgErr, ok := err.(*pgconn.PgError); ok && pgErr.Code == "23505" {
+			return ErrDuplicateRecord
+		}
 		return err
 	}
 
 	query = `
-		INSERT INTO service_categories (service_id, category_id)
-		VALUES ($1, $2)
+		INSERT INTO service_categories (service_id, category_id, provider_id)
+		VALUES ($1, $2, $3)
 	`
 	for _, categoryID := range s.Categories {
-		_, err = tx.ExecContext(ctx, query, s.ID, categoryID)
+		_, err = tx.ExecContext(ctx, query, s.ID, categoryID, s.ProviderID)
 		if err != nil {
+			if pgErr, ok := err.(*pgconn.PgError); ok && pgErr.Code == "23503" {
+				return ErrCategoryNotFound
+			}
 			return err
 		}
 	}
 
 	query = `
-		INSERT INTO staff_services (staff_id, service_id)
-		VALUES ($1, $2)
+		INSERT INTO staff_services (staff_id, service_id, provider_id)
+		VALUES ($1, $2, $3)
 	`
 	for _, staffID := range s.Staff {
-		_, err = tx.ExecContext(ctx, query, staffID, s.ID)
+		_, err = tx.ExecContext(ctx, query, staffID, s.ID, s.ProviderID)
 		if err != nil {
+			if pgErr, ok := err.(*pgconn.PgError); ok && pgErr.Code == "23503" {
+				return ErrStaffNotFound
+			}
 			return err
 		}
 	}

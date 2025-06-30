@@ -34,7 +34,7 @@ func (app *application) registerUserHandler(w http.ResponseWriter, r *http.Reque
 	err = app.models.Users.InsertInitial(user)
 	if err != nil {
 		switch {
-		case errors.Is(err, data.ErrDuplicateEmail):
+		case errors.Is(err, data.ErrDuplicateRecord):
 			v.AddError("email", "a user with this email address already exists")
 			app.failedValidationResponse(w, r, v.Errors)
 		default:

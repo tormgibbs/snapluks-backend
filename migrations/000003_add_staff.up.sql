@@ -5,5 +5,6 @@ CREATE TABLE staff (
   email citext NOT NULL UNIQUE,
   profile_picture TEXT,
   is_owner BOOLEAN NOT NULL DEFAULT FALSE,
-  provider_id INTEGER NOT NULL REFERENCES providers(id) ON DELETE CASCADE
+  provider_id INTEGER NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
+  UNIQUE (provider_id, id)
 )

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/tormgibbs/snapluks-backend/internal/validator"
 )
 
@@ -80,6 +81,9 @@ func (m *ProviderModel) Insert(p *Provider, u *User) error {
 
 	err = tx.QueryRowContext(ctx, query, args...).Scan(&p.ID)
 	if err != nil {
+		if pgErr, ok := err.(*pgconn.PgError); ok && pgErr.Code == "23505" {
+			return ErrDuplicateRecord
+		}
 		return fmt.Errorf("inserting provider: %w", err)
 	}
 

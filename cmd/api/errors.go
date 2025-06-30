@@ -64,6 +64,10 @@ func (app *application) notPermittedResponse(w http.ResponseWriter, r *http.Requ
 	app.errorResponse(w, r, http.StatusForbidden, message)
 }
 
+func (app *application) notPermittedWithMessageResponse(w http.ResponseWriter, r *http.Request, msg string) {
+	app.errorResponse(w, r, http.StatusForbidden, msg)
+}
+
 func (app *application) invalidCredentialsResponse(w http.ResponseWriter, r *http.Request) {
 	message := "invalid credentials, please try again"
 	app.errorResponse(w, r, http.StatusUnauthorized, message)
@@ -78,3 +82,5 @@ func (app *application) authenticationRequiredResponse(w http.ResponseWriter, r 
 	message := "you must be authenticated to access this resource"
 	app.errorResponse(w, r, http.StatusUnauthorized, message)
 }
+
+

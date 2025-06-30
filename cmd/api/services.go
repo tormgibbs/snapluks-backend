@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/tormgibbs/snapluks-backend/internal/data"
@@ -33,7 +34,13 @@ func (app *application) createServiceHandler(w http.ResponseWriter, r *http.Requ
 
 	provider, err := app.models.Providers.GetByUserID(user.ID)
 	if err != nil {
-		app.serverErrorResponse(w, r, err)
+		switch {
+		case errors.Is(err, data.ErrRecordNotFound):
+			msg := "you must setup a provider profile"
+			app.notPermittedWithMessageResponse(w, r, msg)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
 		return
 	}
 
@@ -55,7 +62,25 @@ func (app *application) createServiceHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	err = app.writeJSON(w, http.StatusCreated, envelope{"service": input}, nil)
+	err = app.models.Services.Insert(service)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrDuplicateRecord):
+			v.AddError("service", "a service with that name already exists for this provider")
+			app.failedValidationResponse(w, r, v.Errors)
+		case errors.Is(err, data.ErrCategoryNotFound):
+			v.AddError("category", "one or more provided categories were not found")
+			app.failedValidationResponse(w, r, v.Errors)
+		case errors.Is(err, data.ErrStaffNotFound):
+			v.AddError("staff", "one or more selected staff members do not exist")
+			app.failedValidationResponse(w, r, v.Errors)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+
+	err = app.writeJSON(w, http.StatusCreated, envelope{"service": service}, nil)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 	}

@@ -141,7 +141,7 @@ func (m UserModel) Insert(u *User) error {
 		if errors.As(err, &pgErr) {
 			switch {
 			case pgErr.Code == "23505" && pgErr.ConstraintName == "users_email_key":
-				return ErrDuplicateEmail
+				return ErrDuplicateRecord
 			default:
 				return err
 			}
@@ -165,7 +165,7 @@ func (m UserModel) InsertInitial(u *User) error {
 		if errors.As(err, &pgErr) {
 			switch {
 			case pgErr.Code == "23505" && pgErr.ConstraintName == "users_email_key":
-				return ErrDuplicateEmail
+				return ErrDuplicateRecord
 			default:
 				return err
 			}

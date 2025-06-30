@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/tormgibbs/snapluks-backend/internal/data"
@@ -45,6 +46,10 @@ func (app *application) createProviderHandler(w http.ResponseWriter, r *http.Req
 
 	err = app.models.Providers.Insert(provider, user)
 	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrDuplicateRecord):
+			v.AddError("provider", "this user already has a provider profile")
+		}
 		app.serverErrorResponse(w, r, err)
 		return
 	}
