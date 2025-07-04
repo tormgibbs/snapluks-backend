@@ -4,17 +4,24 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/tormgibbs/snapluks-backend/internal/validator"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
+	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/tormgibbs/snapluks-backend/internal/validator"
 
 	"github.com/julienschmidt/httprouter"
 )
 
 type envelope map[string]any
+
+var validImageExts = []string{".jpg", ".jpeg", ".png", ".gif", ".webp"}
 
 func (app *application) readIDParam(r *http.Request) (int64, error) {
 	params := httprouter.ParamsFromContext(r.Context())
@@ -161,4 +168,55 @@ func (app *application) background(fn func()) {
 		}()
 		fn()
 	}()
+}
+
+func (app *application) uploadImageToS3(fileHeader *multipart.FileHeader) (string, error) {
+	file, err := fileHeader.Open()
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	if !isValidImageType(fileHeader.Filename) {
+		return "", errors.New("invalid image type")
+	}
+
+	if fileHeader.Size > 5*1024*1024 {
+		return "", errors.New("image size limit exceeded")
+	}
+
+	ext := filepath.Ext(fileHeader.Filename)
+	s3Key := fmt.Sprintf("services/%d_%s%s", time.Now().UnixNano(),
+		strings.ReplaceAll(fileHeader.Filename[:len(fileHeader.Filename)-len(ext)], " ", "_"), ext)
+
+	_, err = app.s3Client.UploadFile(file, s3Key, fileHeader.Header.Get("Content-Type"))
+	if err != nil {
+		return "", fmt.Errorf("failed to upload to S3: %w", err)
+	}
+
+	return s3Key, nil
+}
+
+func isValidImageType(filename string) bool {
+	ext := strings.ToLower(filepath.Ext(filename))
+	return slices.Contains(validImageExts, ext)
+}
+
+func (app *application) cleanupFailedServiceCreation(serviceID, providerID int64, uploadedImages []string) {
+	err := app.models.Services.Delete(serviceID, providerID)
+	if err != nil {
+		app.logger.PrintError(err, map[string]string{
+			"service_id":  fmt.Sprintf("%d", serviceID),
+			"provider_id": fmt.Sprintf("%d", providerID),
+		})
+	}
+
+	if len(uploadedImages) > 0 {
+		err = app.s3Client.DeleteFiles(uploadedImages)
+		if err != nil {
+			app.logger.PrintError(err, map[string]string{
+				"images": fmt.Sprintf("%v", uploadedImages),
+			})
+		}
+	}
 }

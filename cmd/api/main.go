@@ -14,6 +14,7 @@ import (
 
 	"github.com/joho/godotenv"
 	"github.com/tormgibbs/snapluks-backend/internal/mailer"
+	"github.com/tormgibbs/snapluks-backend/internal/s3"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "github.com/joho/godotenv/autoload"
@@ -42,11 +43,12 @@ type config struct {
 }
 
 type application struct {
-	config config
-	logger *jsonlog.Logger
-	mailer mailer.Mailer
-	models data.Models
-	wg     sync.WaitGroup
+	config   config
+	mailer   mailer.Mailer
+	models   data.Models
+	wg       sync.WaitGroup
+	logger   *jsonlog.Logger
+	s3Client *s3.Client
 }
 
 func main() {
@@ -60,13 +62,19 @@ func main() {
 	}
 	defer db.Close()
 
+	s3Client, err := s3.NewClient("snapluks")
+	if err != nil {
+		logger.PrintFatal(err, nil)
+	}
+
 	logger.PrintInfo("database connection pool established", nil)
 
 	app := &application{
-		config: cfg,
-		logger: logger,
-		models: data.NewModels(db),
-		mailer: mailer.New(cfg.smtp.host, cfg.smtp.port, cfg.smtp.user, cfg.smtp.pass, cfg.smtp.sender),
+		config:   cfg,
+		logger:   logger,
+		models:   data.NewModels(db),
+		mailer:   mailer.New(cfg.smtp.host, cfg.smtp.port, cfg.smtp.user, cfg.smtp.pass, cfg.smtp.sender),
+		s3Client: s3Client,
 	}
 
 	mux := http.NewServeMux()

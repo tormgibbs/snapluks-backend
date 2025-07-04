@@ -23,15 +23,16 @@ type ServiceModel struct {
 }
 
 type Service struct {
-	ID          int64   `json:"id"`
-	ProviderID  int64   `json:"-"`
-	TypeID      int32   `json:"type_id"`
-	Categories  []int32 `json:"categories"`
-	Name        string  `json:"name"`
-	Description string  `json:"description"`
-	Duration    string  `json:"duration"`
-	Price       float64 `json:"price"`
-	Staff       []int64 `json:"staff"`
+	ID          int64    `json:"id"`
+	ProviderID  int64    `json:"-"`
+	TypeID      int32    `json:"type_id"`
+	Categories  []int32  `json:"categories"`
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Duration    string   `json:"duration"`
+	Price       float64  `json:"price"`
+	Staff       []int64  `json:"staff"`
+	Images      []string `json:"images"`
 }
 
 func validateDuration(v *validator.Validator, duration string) {
@@ -138,6 +139,57 @@ func (m ServiceModel) Insert(s *Service) (err error) {
 			}
 			return err
 		}
+	}
+
+	// if len(s.Images) > 0 {
+	// 	query = `
+	// 		INSERT INTO service_images (service_id, provider_id, image_url, is_primary)
+	// 		VALUES ($1, $2, $3, $4)
+	// 	`
+	// 	for i, imageURL := range s.Images {
+	// 		isPrimary := i == 0
+	// 		_, err = tx.ExecContext(ctx, query, s.ID, s.ProviderID, imageURL, isPrimary)
+	// 		if err != nil {
+	// 			return fmt.Errorf("error inserting service image: %w", err)
+	// 		}
+	// 	}
+	// }
+
+	return nil
+}
+
+func (m ServiceModel) InsertImage(serviceID, providerID int64, imageURL string, isPrimary bool) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	query := `
+		INSERT INTO service_images (service_id, provider_id, image_url, is_primary)
+		VALUES ($1, $2, $3, $4)
+	`
+	_, err := m.DB.ExecContext(ctx, query, serviceID, providerID, imageURL, isPrimary)
+	return err
+}
+
+func (m ServiceModel) Delete(serviceID, providerID int64) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	query := `
+		DELETE FROM services 
+		WHERE id = $1 AND provider_id = $2
+	`
+	result, err := m.DB.ExecContext(ctx, query, serviceID, providerID)
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if rowsAffected == 0 {
+		return ErrRecordNotFound
 	}
 
 	return nil
