@@ -2,9 +2,11 @@ package main
 
 import (
 	"errors"
+	"mime/multipart"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/tormgibbs/snapluks-backend/internal/data"
 	"github.com/tormgibbs/snapluks-backend/internal/validator"
@@ -113,27 +115,81 @@ func (app *application) createServiceHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	uploadedImages := make([]string, 0)
-	for i, fileHeader := range files {
-		key, err := app.uploadImageToS3(fileHeader)
-		if err != nil {
-			app.cleanupFailedServiceCreation(service.ID, provider.ID, uploadedImages)
-			app.serverErrorResponse(w, r, err)
-			return
-		}
-		uploadedImages = append(uploadedImages, key)
+	uploadedImages := make([]string, len(files))
+	var wg sync.WaitGroup
+	errChan := make(chan error, len(files))
 
-		err = app.models.Services.InsertImage(service.ID, provider.ID, key, i == 0)
-		if err != nil {
-			app.cleanupFailedServiceCreation(service.ID, provider.ID, uploadedImages)
-			app.serverErrorResponse(w, r, err)
-			return
-		}
+	for i, fileHeader := range files {
+		wg.Add(1)
+		go func(index int, fh *multipart.FileHeader) {
+			defer wg.Done()
+
+			key, err := app.uploadImageToS3(fh)
+			if err != nil {
+				errChan <- err
+				return
+			}
+			uploadedImages[index] = key
+
+			err = app.models.Services.InsertImage(service.ID, provider.ID, key, index == 0)
+			if err != nil {
+				errChan <- err
+				return
+			}
+		}(i, fileHeader)
 	}
+
+	wg.Wait()
+	close(errChan)
+
+	if len(errChan) > 0 {
+		app.cleanupFailedServiceCreation(service.ID, provider.ID, uploadedImages)
+		app.serverErrorResponse(w, r, <-errChan)
+		return
+	}
+
+	// err = app.models.Services.InsertImages(service.ID, provider.ID, uploadedImages)
+	// if err != nil {
+	// 	app.cleanupFailedServiceCreation(service.ID, provider.ID, uploadedImages)
+	// 	app.serverErrorResponse(w, r, err)
+	// 	return
+	// }
 
 	service.Images = uploadedImages
 
 	err = app.writeJSON(w, http.StatusCreated, envelope{"service": service}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+}
+
+func (app *application) listServiceHandler(w http.ResponseWriter, r *http.Request) {
+	user := app.contextGetUser(r)
+
+	if user.Role != data.RoleProvider {
+		app.notPermittedResponse(w, r)
+		return
+	}
+
+	provider, err := app.models.Providers.GetByUserID(user.ID)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrRecordNotFound):
+			msg := "you must setup a provider profile"
+			app.notPermittedWithMessageResponse(w, r, msg)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+
+	services, err := app.models.Services.GetAllForProvider(provider.ID)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
+
+	err = app.writeJSON(w, http.StatusCreated, envelope{"services": services}, nil)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 	}

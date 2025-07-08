@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -219,4 +220,345 @@ func (app *application) cleanupFailedServiceCreation(serviceID, providerID int64
 			})
 		}
 	}
+}
+
+func (app *application) getFormValue(form *multipart.Form, key string) *string {
+	if val, ok := form.Value[key]; ok && len(val) > 0 {
+		val := strings.TrimSpace(val[0])
+		return &val
+	}
+	return nil
+}
+
+func (app *application) _readMultipartForm(w http.ResponseWriter, r *http.Request, maxMemory int64) error {
+	err := r.ParseMultipartForm(maxMemory)
+	if err != nil {
+		var maxBytesError *http.MaxBytesError
+
+		switch {
+		case errors.As(err, &maxBytesError):
+			return fmt.Errorf("multipart form too large (maximum %d bytes)", maxMemory)
+
+		case err == http.ErrNotMultipart:
+			return errors.New("request is not multipart/form-data")
+
+		case err == http.ErrMissingBoundary:
+			return errors.New("multipart form missing boundary")
+
+		case strings.Contains(err.Error(), "no multipart boundary param"):
+			return errors.New("invalid multipart boundary")
+
+		case strings.Contains(err.Error(), "malformed MIME header"):
+			return errors.New("malformed multipart form")
+
+		default:
+			return fmt.Errorf("failed to parse multipart form: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func (app *application) readMultipartForm(r *http.Request, maxMemory int64, v any) error {
+	err := r.ParseMultipartForm(maxMemory)
+	if err != nil {
+		var maxBytesError *http.MaxBytesError
+
+		switch {
+		case errors.As(err, &maxBytesError):
+			return fmt.Errorf("multipart form too large (maximum %d bytes)", maxMemory)
+
+		case err == http.ErrNotMultipart:
+			return errors.New("request is not multipart/form-data")
+
+		case err == http.ErrMissingBoundary:
+			return errors.New("multipart form missing boundary")
+
+		case strings.Contains(err.Error(), "no multipart boundary param"):
+			return errors.New("invalid multipart boundary")
+
+		case strings.Contains(err.Error(), "malformed MIME header"):
+			return errors.New("malformed multipart form")
+
+		default:
+			return fmt.Errorf("failed to parse multipart form: %w", err)
+		}
+	}
+
+	return app.populateStructFromForm(r, v)
+}
+
+func (app *application) _populateStructFromForm(r *http.Request, v any) error {
+	val := reflect.ValueOf(v)
+	if val.Kind() != reflect.Ptr || val.Elem().Kind() != reflect.Struct {
+		return errors.New("v must be a pointer to a struct")
+	}
+
+	val = val.Elem()
+	typ := val.Type()
+
+	for i := 0; i < val.NumField(); i++ {
+		field := val.Field(i)
+		structField := typ.Field(i)
+
+		if !field.CanSet() {
+			continue
+		}
+
+		// Parse the tag
+		tag := structField.Tag.Get("form")
+		if tag == "-" {
+			continue
+		}
+
+		parts := strings.Split(tag, ",")
+		formKey := strings.TrimSpace(parts[0])
+		if formKey == "" {
+			formKey = strings.ToLower(structField.Name)
+		}
+
+		isOptional := false
+		for _, part := range parts[1:] {
+			if strings.TrimSpace(part) == "optional" {
+				isOptional = true
+				break
+			}
+		}
+
+		// Handle file uploads
+		if structField.Type == reflect.TypeOf((*multipart.FileHeader)(nil)) {
+			file, fileHeader, err := r.FormFile(formKey)
+			if err != nil {
+				if errors.Is(err, http.ErrMissingFile) && isOptional {
+					continue
+				}
+				return fmt.Errorf("error reading file %q: %w", formKey, err)
+			}
+			file.Close() // just to be safe; we're only storing the header
+			field.Set(reflect.ValueOf(fileHeader))
+			continue
+		}
+
+		// Handle form values
+		formValues := r.Form[formKey]
+		if len(formValues) == 0 {
+			if !isOptional {
+				return fmt.Errorf("missing required field: %s", formKey)
+			}
+			continue
+		}
+
+		valStr := formValues[0]
+
+		switch field.Kind() {
+		case reflect.String:
+			field.SetString(valStr)
+
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			i64, err := strconv.ParseInt(valStr, 10, 64)
+			if err != nil {
+				return fmt.Errorf("invalid int for field %s: %w", formKey, err)
+			}
+			field.SetInt(i64)
+
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+			u64, err := strconv.ParseUint(valStr, 10, 64)
+			if err != nil {
+				return fmt.Errorf("invalid uint for field %s: %w", formKey, err)
+			}
+			field.SetUint(u64)
+
+		case reflect.Float32, reflect.Float64:
+			f64, err := strconv.ParseFloat(valStr, 64)
+			if err != nil {
+				return fmt.Errorf("invalid float for field %s: %w", formKey, err)
+			}
+			field.SetFloat(f64)
+
+		case reflect.Bool:
+			b, err := strconv.ParseBool(valStr)
+			if err != nil {
+				return fmt.Errorf("invalid bool for field %s: %w", formKey, err)
+			}
+			field.SetBool(b)
+
+		default:
+			// You can add slice/nested struct handling here if needed
+			continue
+		}
+	}
+
+	return nil
+}
+
+func (app *application) populateStructFromForm(r *http.Request, v any) error {
+	rv := reflect.ValueOf(v)
+	if rv.Kind() != reflect.Ptr || rv.Elem().Kind() != reflect.Struct {
+		return fmt.Errorf("destination must be a pointer to a struct")
+	}
+
+	rv = rv.Elem()
+	rt := rv.Type()
+
+	for i := 0; i < rv.NumField(); i++ {
+		field := rv.Field(i)
+		structField := rt.Field(i)
+
+		if !field.CanSet() {
+			continue
+		}
+
+		// Get the form tag name, fallback to json tag, then field name
+		formTag := structField.Tag.Get("form")
+		if formTag == "" {
+			formTag = strings.ToLower(structField.Name)
+		}
+
+		// Handle different field types
+		switch field.Kind() {
+		case reflect.String:
+			if value := r.FormValue(formTag); value != "" {
+				field.SetString(value)
+			}
+
+		case reflect.Ptr:
+			if field.Type().Elem().Kind() == reflect.String {
+				if value := r.FormValue(formTag); value != "" {
+					field.Set(reflect.ValueOf(&value))
+				}
+			} else if field.Type() == reflect.TypeOf((*multipart.FileHeader)(nil)) {
+				if file, header, err := r.FormFile(formTag); err == nil {
+					file.Close()
+					field.Set(reflect.ValueOf(header))
+				}
+			} else if value := r.FormValue(formTag); value != "" {
+				elemKind := field.Type().Elem().Kind()
+				switch elemKind {
+				case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+					if num, err := strconv.ParseInt(value, 10, 64); err == nil {
+						newVal := reflect.New(field.Type().Elem())
+						newVal.Elem().SetInt(num)
+						field.Set(newVal)
+					}
+				case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+					if num, err := strconv.ParseUint(value, 10, 64); err == nil {
+						newVal := reflect.New(field.Type().Elem())
+						newVal.Elem().SetUint(num)
+						field.Set(newVal)
+					}
+				case reflect.Float32, reflect.Float64:
+					if f, err := strconv.ParseFloat(value, 64); err == nil {
+						newVal := reflect.New(field.Type().Elem())
+						newVal.Elem().SetFloat(f)
+						field.Set(newVal)
+					}
+				case reflect.Bool:
+					if b, err := strconv.ParseBool(value); err == nil {
+						newVal := reflect.New(field.Type().Elem())
+						newVal.Elem().SetBool(b)
+						field.Set(newVal)
+					}
+				}
+			}
+
+		case reflect.Slice:
+			if field.Type().Elem().Kind() == reflect.Int64 {
+				// Handle []int64 fields (like Services)
+				values := r.Form[formTag]
+				if len(values) > 0 {
+					slice := make([]int64, 0, len(values))
+					for _, v := range values {
+						if v != "" {
+							if num, err := strconv.ParseInt(v, 10, 64); err == nil {
+								slice = append(slice, num)
+							}
+						}
+					}
+					if len(slice) > 0 {
+						field.Set(reflect.ValueOf(slice))
+					}
+				}
+			} else if field.Type() == reflect.TypeOf([]*multipart.FileHeader{}) {
+				// Handle []*multipart.FileHeader fields
+				if r.MultipartForm != nil && r.MultipartForm.File != nil {
+					if fileHeaders, exists := r.MultipartForm.File[formTag]; exists {
+						field.Set(reflect.ValueOf(fileHeaders))
+					}
+				}
+			}
+
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			if value := r.FormValue(formTag); value != "" {
+				if num, err := strconv.ParseInt(value, 10, 64); err == nil {
+					field.SetInt(num)
+				}
+			}
+
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+			if value := r.FormValue(formTag); value != "" {
+				if num, err := strconv.ParseUint(value, 10, 64); err == nil {
+					field.SetUint(num)
+				}
+			}
+
+		case reflect.Float32, reflect.Float64:
+			if value := r.FormValue(formTag); value != "" {
+				if f, err := strconv.ParseFloat(value, 64); err == nil {
+					field.SetFloat(f)
+				}
+			}
+
+		case reflect.Bool:
+			if value := r.FormValue(formTag); value != "" {
+				if b, err := strconv.ParseBool(value); err == nil {
+					field.SetBool(b)
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+func (app *application) getFormValueOptional(form *multipart.Form, key string) *string {
+	values, exists := form.Value[key]
+	if !exists || len(values) == 0 || values[0] == "" {
+		return nil
+	}
+	return &values[0]
+}
+
+func (app *application) getFormValueRequired(form *multipart.Form, key string) (*string, error) {
+	values, exists := form.Value[key]
+	if !exists {
+		return nil, fmt.Errorf("required field '%s' is missing", key)
+	}
+
+	if len(values) == 0 || values[0] == "" {
+		return nil, fmt.Errorf("field '%s' cannot be empty", key)
+	}
+
+	return &values[0], nil
+}
+
+func (app *application) getFormFileOptional(r *http.Request, key string) (multipart.File, *multipart.FileHeader, error) {
+	file, header, err := r.FormFile(key)
+	if err != nil {
+		if err == http.ErrMissingFile {
+			return nil, nil, nil // Not an error, just missing
+		}
+		return nil, nil, fmt.Errorf("failed to get file '%s': %w", key, err)
+	}
+	return file, header, nil
+}
+
+func (app *application) getFormFileRequired(r *http.Request, key string) (multipart.File, *multipart.FileHeader, error) {
+	file, header, err := r.FormFile(key)
+	if err != nil {
+		if err == http.ErrMissingFile {
+			return nil, nil, fmt.Errorf("required file field '%s' is missing", key)
+		}
+		return nil, nil, fmt.Errorf("failed to get file '%s': %w", key, err)
+	}
+	return file, header, nil
 }

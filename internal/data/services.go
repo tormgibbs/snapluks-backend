@@ -141,21 +141,69 @@ func (m ServiceModel) Insert(s *Service) (err error) {
 		}
 	}
 
-	// if len(s.Images) > 0 {
-	// 	query = `
-	// 		INSERT INTO service_images (service_id, provider_id, image_url, is_primary)
-	// 		VALUES ($1, $2, $3, $4)
-	// 	`
-	// 	for i, imageURL := range s.Images {
-	// 		isPrimary := i == 0
-	// 		_, err = tx.ExecContext(ctx, query, s.ID, s.ProviderID, imageURL, isPrimary)
-	// 		if err != nil {
-	// 			return fmt.Errorf("error inserting service image: %w", err)
-	// 		}
-	// 	}
-	// }
-
 	return nil
+}
+
+func (m ServiceModel) GetAllForProvider(providerID int64) ([]*Service, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	query := `
+		SELECT s.id, s.name, s.description, s.duration, s.price, s.type_id, s.provider_id,
+			COALESCE(array_agg(DISTINCT c.id) FILTER (WHERE c.id IS NOT NULL), '{}') as category_ids,
+			COALESCE(array_agg(DISTINCT st.id) FILTER (WHERE st.id IS NOT NULL), '{}') as staff_ids
+		FROM services s
+		LEFT JOIN service_categories sc ON s.id = sc.service_id
+		LEFT JOIN categories c ON sc.category_id = c.id
+		LEFT JOIN staff_services ss ON s.id = ss.service_id
+		LEFT JOIN staff st ON ss.staff_id = st.id
+		WHERE s.provider_id = $1
+		GROUP BY s.id, s.name, s.description, s.duration, s.price, s.type_id, s.provider_id
+		ORDER BY s.name
+	`
+
+	rows, err := m.DB.QueryContext(ctx, query, providerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	services := make([]*Service, 0)
+
+	for rows.Next() {
+		var service Service
+		var categoryIDs []int32
+		var staffIDs []int64
+
+		err := rows.Scan(
+			&service.ID,
+			&service.Name,
+			&service.Description,
+			&service.Duration,
+			&service.Price,
+			&service.TypeID,
+			&service.ProviderID,
+			&categoryIDs,
+			&staffIDs,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		service.Categories = make([]int32, len(categoryIDs))
+		copy(service.Categories, categoryIDs)
+
+		service.Staff = make([]int64, len(staffIDs))
+		copy(service.Staff, staffIDs)
+
+		services = append(services, &service)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return services, nil
 }
 
 func (m ServiceModel) InsertImage(serviceID, providerID int64, imageURL string, isPrimary bool) error {
@@ -167,6 +215,30 @@ func (m ServiceModel) InsertImage(serviceID, providerID int64, imageURL string, 
 		VALUES ($1, $2, $3, $4)
 	`
 	_, err := m.DB.ExecContext(ctx, query, serviceID, providerID, imageURL, isPrimary)
+	return err
+}
+
+func (m ServiceModel) InsertImages(serviceID, providerID int64, imageKeys []string) error {
+	if len(imageKeys) == 0 {
+		return nil
+	}
+
+	query := `
+		INSERT INTO service_images (service_id, provider_id, image_url, is_primary)
+		VALUES 
+	`
+	args := make([]any, 0, len(imageKeys)*4)
+	placeholders := make([]string, 0, len(imageKeys))
+
+	for i, key := range imageKeys {
+		placeholders = append(placeholders, fmt.Sprintf("($%d, $%d, $%d, $%d)",
+			i*4+1, i*4+2, i*4+3, i*4+4))
+		args = append(args, serviceID, providerID, key, i == 0) // First image is primary
+	}
+
+	query += strings.Join(placeholders, ", ")
+
+	_, err := m.DB.Exec(query, args...)
 	return err
 }
 

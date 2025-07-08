@@ -59,3 +59,98 @@ func (app *application) createProviderHandler(w http.ResponseWriter, r *http.Req
 		app.serverErrorResponse(w, r, err)
 	}
 }
+
+func (app *application) updateProviderHandler(w http.ResponseWriter, r *http.Request) {
+	err := r.ParseMultipartForm(10 << 20)
+	if err != nil {
+		app.badRequestResponse(w, r, err)
+		return
+	}
+
+	user := app.contextGetUser(r)
+
+	if user.Role != data.RoleProvider {
+		app.notPermittedResponse(w, r)
+		return
+	}
+
+	provider, err := app.models.Providers.GetByUserID(user.ID)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrRecordNotFound):
+			msg := "you must setup a provider profile"
+			app.notPermittedWithMessageResponse(w, r, msg)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+
+	form := r.MultipartForm
+
+	name := app.getFormValue(form, "name")
+	email := app.getFormValue(form, "email")
+	phone := app.getFormValue(form, "phone_number")
+	description := app.getFormValue(form, "description")
+
+	logoFile, logoHeader, err := r.FormFile("logo")
+	if err != nil && err != http.ErrMissingFile {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
+
+	coverFile, coverHeader, err := r.FormFile("cover_photo")
+	if err != nil && err != http.ErrMissingFile {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
+
+	if name != nil {
+		provider.Name = *name
+	}
+	if email != nil {
+		provider.Email = *email
+	}
+	if phone != nil {
+		provider.PhoneNumber = *phone
+	}
+	if description != nil {
+		provider.Description = *description
+	}
+
+	if logoFile != nil {
+		key, err := app.uploadImageToS3(logoHeader)
+		if err != nil {
+			app.serverErrorResponse(w, r, err)
+			return
+		}
+		provider.LogoURL = key
+	}
+
+	if coverFile != nil {
+		key, err := app.uploadImageToS3(coverHeader)
+		if err != nil {
+			app.serverErrorResponse(w, r, err)
+			return
+		}
+		provider.CoverURL = key
+	}
+
+	v := validator.New()
+
+	if data.ValidateProvider(v, provider); !v.Valid() {
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+
+	err = app.models.Providers.Update(provider)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
+
+	err = app.writeJSON(w, http.StatusOK, envelope{"provider": provider}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+}

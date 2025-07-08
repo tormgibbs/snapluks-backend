@@ -66,15 +66,16 @@ func (m *ProviderModel) Insert(p *Provider, u *User) error {
 	}()
 
 	query := `
-		INSERT INTO providers (user_id, name, provider_type_id, phone_number, description)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO providers (user_id, provider_type_id, name, email, phone_number, description)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id;
 	`
 
 	args := []any{
 		p.UserID,
-		p.Name,
 		p.TypeID,
+		p.Name,
+		p.Email,
 		p.PhoneNumber,
 		p.Description,
 	}
@@ -109,7 +110,7 @@ func (m *ProviderModel) Insert(p *Provider, u *User) error {
 
 func (m ProviderModel) GetByUserID(userID int64) (*Provider, error) {
 	query := `
-		SELECT id, name, phone_number, description
+		SELECT id, user_id, provider_type_id, name, email, phone_number, description
 		FROM providers
 		WHERE user_id = $1
 	`
@@ -120,7 +121,10 @@ func (m ProviderModel) GetByUserID(userID int64) (*Provider, error) {
 
 	err := m.DB.QueryRowContext(ctx, query, userID).Scan(
 		&provider.ID,
+		&provider.UserID,
+		&provider.TypeID,
 		&provider.Name,
+		&provider.Email,
 		&provider.PhoneNumber,
 		&provider.Description,
 	)
@@ -135,4 +139,38 @@ func (m ProviderModel) GetByUserID(userID int64) (*Provider, error) {
 	}
 
 	return &provider, nil
+}
+
+func (m ProviderModel) Update(p *Provider) error {
+	query := `
+		UPDATE providers
+		SET name = $1,
+			email = $2,
+			phone_number = $3,
+			description = $4,
+			logo_url = $5,
+			cover_url = $6
+		WHERE id = $7
+	`
+
+	args := []any{
+		p.Name,
+		p.Email,
+		p.PhoneNumber,
+		p.Description,
+		p.LogoURL,
+		p.CoverURL,
+		p.ID,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	_, err := m.DB.ExecContext(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+
+	return nil
+
 }
