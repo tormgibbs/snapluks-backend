@@ -149,14 +149,8 @@ func (m ServiceModel) GetAllForProvider(providerID int64) ([]*Service, error) {
 	defer cancel()
 
 	query := `
-		SELECT s.id, s.name, s.description, s.duration, s.price, s.type_id, s.provider_id,
-			COALESCE(array_agg(DISTINCT c.id) FILTER (WHERE c.id IS NOT NULL), '{}') as category_ids,
-			COALESCE(array_agg(DISTINCT st.id) FILTER (WHERE st.id IS NOT NULL), '{}') as staff_ids
+		SELECT s.id, s.name, s.description, s.duration, s.price, s.type_id, s.provider_id
 		FROM services s
-		LEFT JOIN service_categories sc ON s.id = sc.service_id
-		LEFT JOIN categories c ON sc.category_id = c.id
-		LEFT JOIN staff_services ss ON s.id = ss.service_id
-		LEFT JOIN staff st ON ss.staff_id = st.id
 		WHERE s.provider_id = $1
 		GROUP BY s.id, s.name, s.description, s.duration, s.price, s.type_id, s.provider_id
 		ORDER BY s.name
@@ -172,8 +166,6 @@ func (m ServiceModel) GetAllForProvider(providerID int64) ([]*Service, error) {
 
 	for rows.Next() {
 		var service Service
-		var categoryIDs []int32
-		var staffIDs []int64
 
 		err := rows.Scan(
 			&service.ID,
@@ -183,18 +175,10 @@ func (m ServiceModel) GetAllForProvider(providerID int64) ([]*Service, error) {
 			&service.Price,
 			&service.TypeID,
 			&service.ProviderID,
-			&categoryIDs,
-			&staffIDs,
 		)
 		if err != nil {
 			return nil, err
 		}
-
-		service.Categories = make([]int32, len(categoryIDs))
-		copy(service.Categories, categoryIDs)
-
-		service.Staff = make([]int64, len(staffIDs))
-		copy(service.Staff, staffIDs)
 
 		services = append(services, &service)
 	}

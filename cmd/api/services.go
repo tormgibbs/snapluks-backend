@@ -4,8 +4,6 @@ import (
 	"errors"
 	"mime/multipart"
 	"net/http"
-	"strconv"
-	"strings"
 	"sync"
 
 	"github.com/tormgibbs/snapluks-backend/internal/data"
@@ -13,55 +11,6 @@ import (
 )
 
 func (app *application) createServiceHandler(w http.ResponseWriter, r *http.Request) {
-	err := r.ParseMultipartForm(10 << 20)
-	if err != nil {
-		app.badRequestResponse(w, r, err)
-		return
-	}
-
-	name := strings.TrimSpace(r.FormValue("name"))
-	description := strings.TrimSpace(r.FormValue("description"))
-	duration := strings.TrimSpace(r.FormValue("duration"))
-	priceStr := strings.TrimSpace(r.FormValue("price"))
-	typeIDStr := strings.TrimSpace(r.FormValue("type_id"))
-	categories := r.Form["categories"]
-	staff := r.Form["staff"]
-
-	v := validator.New()
-
-	price, err := strconv.ParseFloat(priceStr, 64)
-	if err != nil {
-		v.AddError("price", "invalid price format")
-		app.failedValidationResponse(w, r, v.Errors)
-		return
-	}
-
-	typeID, err := strconv.Atoi(typeIDStr)
-	if err != nil {
-		v.AddError("type_id", "invalid type_id format")
-		app.failedValidationResponse(w, r, v.Errors)
-		return
-	}
-
-	categoryIDs, err := data.ParseIntSlice[int32](categories)
-	if err != nil {
-		app.badRequestResponse(w, r, err)
-		return
-	}
-
-	staffIDs, err := data.ParseIntSlice[int64](staff)
-	if err != nil {
-		app.badRequestResponse(w, r, err)
-		return
-	}
-
-	files := r.MultipartForm.File["images"]
-	if len(files) > 5 {
-		v.AddError("images", "cannot upload more than 5 images")
-		app.failedValidationResponse(w, r, v.Errors)
-		return
-	}
-
 	user := app.contextGetUser(r)
 
 	if user.Role != data.RoleProvider {
@@ -81,18 +30,43 @@ func (app *application) createServiceHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	service := &data.Service{
-		Name:        name,
-		ProviderID:  provider.ID,
-		TypeID:      int32(typeID),
-		Categories:  categoryIDs,
-		Description: description,
-		Duration:    duration,
-		Price:       price,
-		Staff:       staffIDs,
+	var input struct {
+		Name        string                  `form:"name"`
+		Description string                  `form:"description"`
+		Duration    string                  `form:"duration"`
+		Price       float64                 `form:"price"`
+		TypeID      int32                   `form:"type_id"`
+		CategoryIDs []int32                 `form:"categories"`
+		StaffIDs    []int64                 `form:"staff"`
+		Images      []*multipart.FileHeader `form:"images"`
 	}
 
+	err = app.readMultipartForm(r, 10<<20, &input)
+	if err != nil {
+		app.badRequestResponse(w, r, err)
+		return
+	}
+
+	service := &data.Service{
+		Name:        input.Name,
+		ProviderID:  provider.ID,
+		TypeID:      input.TypeID,
+		Categories:  input.CategoryIDs,
+		Description: input.Description,
+		Duration:    input.Duration,
+		Price:       input.Price,
+		Staff:       input.StaffIDs,
+	}
+
+	v := validator.New()
+
 	if data.ValidateService(v, service); !v.Valid() {
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+
+	if len(input.Images) > 5 {
+		v.AddError("images", "cannot upload more than 5 images")
 		app.failedValidationResponse(w, r, v.Errors)
 		return
 	}
@@ -115,11 +89,13 @@ func (app *application) createServiceHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	uploadedImages := make([]string, len(files))
-	var wg sync.WaitGroup
-	errChan := make(chan error, len(files))
+	images := input.Images
 
-	for i, fileHeader := range files {
+	uploadedImages := make([]string, len(images))
+	var wg sync.WaitGroup
+	errChan := make(chan error, len(images))
+
+	for i, fileHeader := range images {
 		wg.Add(1)
 		go func(index int, fh *multipart.FileHeader) {
 			defer wg.Done()
@@ -147,13 +123,6 @@ func (app *application) createServiceHandler(w http.ResponseWriter, r *http.Requ
 		app.serverErrorResponse(w, r, <-errChan)
 		return
 	}
-
-	// err = app.models.Services.InsertImages(service.ID, provider.ID, uploadedImages)
-	// if err != nil {
-	// 	app.cleanupFailedServiceCreation(service.ID, provider.ID, uploadedImages)
-	// 	app.serverErrorResponse(w, r, err)
-	// 	return
-	// }
 
 	service.Images = uploadedImages
 

@@ -33,6 +33,30 @@ CREATE TABLE providers (
 	cover_url TEXT
 );
 
+CREATE TABLE provider_business_hours (
+	id SERIAL PRIMARY KEY,
+	provider_id INTEGER NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
+	day_of_week SMALLINT NOT NULL CHECK (day_of_week BETWEEN 0 AND 6), -- 0=Sunday, 6=Saturday
+	is_closed BOOLEAN NOT NULL DEFAULT FALSE,
+	open_time TIME,
+	close_time TIME,
+	CHECK (
+		(is_closed = TRUE AND open_time IS NULL AND close_time IS NULL) OR
+		(is_closed = FALSE AND open_time IS NOT NULL AND close_time IS NOT NULL AND open_time < close_time)
+	),
+	UNIQUE (provider_id, day_of_week)
+);
+
+
+CREATE TABLE provider_images (
+  id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  provider_id INTEGER NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
+  image_url TEXT NOT NULL,
+  uploaded_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX idx_provider_images_id ON provider_images(provider_id);
+
 -- Client table
 CREATE TABLE clients (
 	id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

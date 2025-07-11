@@ -6,8 +6,8 @@ import (
 )
 
 var (
-	ErrRecordNotFound = errors.New("record not found")
-	ErrEditConflict   = errors.New("edit conflict")
+	ErrRecordNotFound  = errors.New("record not found")
+	ErrEditConflict    = errors.New("edit conflict")
 	ErrDuplicateRecord = errors.New("duplicate record")
 )
 
@@ -18,6 +18,8 @@ type Models struct {
 	Categories              CategoryModel
 	Services                ServiceModel
 	Staff                   StaffModel
+	ProviderImages          ProviderImageModel
+	ProviderBusinessHours   ProviderBusinessHoursModel
 	EmailVerificationTokens EmailVerificationTokenModel
 }
 
@@ -29,6 +31,8 @@ func NewModels(DB *sql.DB) Models {
 		Services:                ServiceModel{DB},
 		Staff:                   StaffModel{DB},
 		Categories:              CategoryModel{DB},
+		ProviderImages:          ProviderImageModel{DB},
+		ProviderBusinessHours:   ProviderBusinessHoursModel{DB},
 		EmailVerificationTokens: EmailVerificationTokenModel{DB},
 	}
 }

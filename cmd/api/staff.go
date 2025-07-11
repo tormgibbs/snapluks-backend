@@ -44,11 +44,15 @@ func (app *application) createStaffHandler(w http.ResponseWriter, r *http.Reques
 	}
 
 	staff := &data.Staff{
-		ProviderID: provider.ID,
-		Name:       input.Name,
-		Phone:      input.Phone,
-		Email:      input.Email,
-		Services:   input.Services,
+		ProviderID:     provider.ID,
+		Name:           input.Name,
+		Phone:          input.Phone,
+		Email:          input.Email,
+		Services:       input.Services,
+	}
+
+	if input.ProfilePicture == nil {
+		staff.ProfilePicture = nil
 	}
 
 	v := validator.New()
@@ -67,6 +71,38 @@ func (app *application) createStaffHandler(w http.ResponseWriter, r *http.Reques
 		default:
 			app.serverErrorResponse(w, r, err)
 		}
+		return
+	}
+
+	err = app.writeJSON(w, http.StatusCreated, envelope{"staff": staff}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+	}
+}
+
+func (app *application) listStaffHandler(w http.ResponseWriter, r *http.Request) {
+	user := app.contextGetUser(r)
+
+	if user.Role != data.RoleProvider {
+		app.notPermittedResponse(w, r)
+		return
+	}
+
+	provider, err := app.models.Providers.GetByUserID(user.ID)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrRecordNotFound):
+			msg := "you must setup a provider profile"
+			app.notPermittedWithMessageResponse(w, r, msg)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+
+	staff, err := app.models.Staff.GetAllForProvider(provider.ID)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
 		return
 	}
 

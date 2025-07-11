@@ -288,109 +288,6 @@ func (app *application) readMultipartForm(r *http.Request, maxMemory int64, v an
 	return app.populateStructFromForm(r, v)
 }
 
-func (app *application) _populateStructFromForm(r *http.Request, v any) error {
-	val := reflect.ValueOf(v)
-	if val.Kind() != reflect.Ptr || val.Elem().Kind() != reflect.Struct {
-		return errors.New("v must be a pointer to a struct")
-	}
-
-	val = val.Elem()
-	typ := val.Type()
-
-	for i := 0; i < val.NumField(); i++ {
-		field := val.Field(i)
-		structField := typ.Field(i)
-
-		if !field.CanSet() {
-			continue
-		}
-
-		// Parse the tag
-		tag := structField.Tag.Get("form")
-		if tag == "-" {
-			continue
-		}
-
-		parts := strings.Split(tag, ",")
-		formKey := strings.TrimSpace(parts[0])
-		if formKey == "" {
-			formKey = strings.ToLower(structField.Name)
-		}
-
-		isOptional := false
-		for _, part := range parts[1:] {
-			if strings.TrimSpace(part) == "optional" {
-				isOptional = true
-				break
-			}
-		}
-
-		// Handle file uploads
-		if structField.Type == reflect.TypeOf((*multipart.FileHeader)(nil)) {
-			file, fileHeader, err := r.FormFile(formKey)
-			if err != nil {
-				if errors.Is(err, http.ErrMissingFile) && isOptional {
-					continue
-				}
-				return fmt.Errorf("error reading file %q: %w", formKey, err)
-			}
-			file.Close() // just to be safe; we're only storing the header
-			field.Set(reflect.ValueOf(fileHeader))
-			continue
-		}
-
-		// Handle form values
-		formValues := r.Form[formKey]
-		if len(formValues) == 0 {
-			if !isOptional {
-				return fmt.Errorf("missing required field: %s", formKey)
-			}
-			continue
-		}
-
-		valStr := formValues[0]
-
-		switch field.Kind() {
-		case reflect.String:
-			field.SetString(valStr)
-
-		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-			i64, err := strconv.ParseInt(valStr, 10, 64)
-			if err != nil {
-				return fmt.Errorf("invalid int for field %s: %w", formKey, err)
-			}
-			field.SetInt(i64)
-
-		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-			u64, err := strconv.ParseUint(valStr, 10, 64)
-			if err != nil {
-				return fmt.Errorf("invalid uint for field %s: %w", formKey, err)
-			}
-			field.SetUint(u64)
-
-		case reflect.Float32, reflect.Float64:
-			f64, err := strconv.ParseFloat(valStr, 64)
-			if err != nil {
-				return fmt.Errorf("invalid float for field %s: %w", formKey, err)
-			}
-			field.SetFloat(f64)
-
-		case reflect.Bool:
-			b, err := strconv.ParseBool(valStr)
-			if err != nil {
-				return fmt.Errorf("invalid bool for field %s: %w", formKey, err)
-			}
-			field.SetBool(b)
-
-		default:
-			// You can add slice/nested struct handling here if needed
-			continue
-		}
-	}
-
-	return nil
-}
-
 func (app *application) populateStructFromForm(r *http.Request, v any) error {
 	rv := reflect.ValueOf(v)
 	if rv.Kind() != reflect.Ptr || rv.Elem().Kind() != reflect.Struct {
@@ -462,27 +359,100 @@ func (app *application) populateStructFromForm(r *http.Request, v any) error {
 			}
 
 		case reflect.Slice:
-			if field.Type().Elem().Kind() == reflect.Int64 {
-				// Handle []int64 fields (like Services)
-				values := r.Form[formTag]
-				if len(values) > 0 {
-					slice := make([]int64, 0, len(values))
-					for _, v := range values {
-						if v != "" {
-							if num, err := strconv.ParseInt(v, 10, 64); err == nil {
-								slice = append(slice, num)
-							}
-						}
-					}
-					if len(slice) > 0 {
-						field.Set(reflect.ValueOf(slice))
-					}
-				}
-			} else if field.Type() == reflect.TypeOf([]*multipart.FileHeader{}) {
+			if field.Type() == reflect.TypeOf([]*multipart.FileHeader{}) {
 				// Handle []*multipart.FileHeader fields
 				if r.MultipartForm != nil && r.MultipartForm.File != nil {
 					if fileHeaders, exists := r.MultipartForm.File[formTag]; exists {
 						field.Set(reflect.ValueOf(fileHeaders))
+					}
+				}
+			} else {
+				// Handle all other slice types
+				values := r.Form[formTag]
+				if len(values) > 0 {
+					elemType := field.Type().Elem()
+					elemKind := elemType.Kind()
+
+					// Create a new slice with the correct element type
+					slice := reflect.MakeSlice(field.Type(), 0, len(values))
+
+					for _, v := range values {
+						if v == "" {
+							continue
+						}
+
+						var elemValue reflect.Value
+
+						switch elemKind {
+						case reflect.String:
+							elemValue = reflect.ValueOf(v)
+
+						case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+							if num, err := strconv.ParseInt(v, 10, 64); err == nil {
+								elemValue = reflect.ValueOf(num).Convert(elemType)
+							}
+
+						case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+							if num, err := strconv.ParseUint(v, 10, 64); err == nil {
+								elemValue = reflect.ValueOf(num).Convert(elemType)
+							}
+
+						case reflect.Float32, reflect.Float64:
+							if f, err := strconv.ParseFloat(v, 64); err == nil {
+								elemValue = reflect.ValueOf(f).Convert(elemType)
+							}
+
+						case reflect.Bool:
+							if b, err := strconv.ParseBool(v); err == nil {
+								elemValue = reflect.ValueOf(b)
+							}
+
+						case reflect.Ptr:
+							ptrElemType := elemType.Elem()
+							ptrElemKind := ptrElemType.Kind()
+
+							var ptrValue reflect.Value
+
+							switch ptrElemKind {
+							case reflect.String:
+								ptrValue = reflect.ValueOf(&v)
+
+							case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+								if num, err := strconv.ParseInt(v, 10, 64); err == nil {
+									convertedNum := reflect.ValueOf(num).Convert(ptrElemType).Interface()
+									ptrValue = reflect.ValueOf(convertedNum).Addr()
+								}
+
+							case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+								if num, err := strconv.ParseUint(v, 10, 64); err == nil {
+									convertedNum := reflect.ValueOf(num).Convert(ptrElemType).Interface()
+									ptrValue = reflect.ValueOf(convertedNum).Addr()
+								}
+
+							case reflect.Float32, reflect.Float64:
+								if f, err := strconv.ParseFloat(v, 64); err == nil {
+									convertedFloat := reflect.ValueOf(f).Convert(ptrElemType).Interface()
+									ptrValue = reflect.ValueOf(convertedFloat).Addr()
+								}
+
+							case reflect.Bool:
+								if b, err := strconv.ParseBool(v); err == nil {
+									ptrValue = reflect.ValueOf(&b)
+								}
+							}
+
+							if ptrValue.IsValid() {
+								elemValue = ptrValue
+							}
+						}
+
+						if elemValue.IsValid() {
+							slice = reflect.Append(slice, elemValue)
+						}
+					}
+
+					if slice.Len() > 0 {
+						field.Set(slice)
 					}
 				}
 			}

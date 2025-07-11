@@ -26,25 +26,21 @@ type Staff struct {
 	Name           string  `json:"name"`
 	Phone          string  `json:"phone"`
 	Email          string  `json:"email"`
-	ProfilePicture string  `json:"profile_picture"`
+	ProfilePicture *string `json:"profile_picture"`
 	IsOwner        bool    `json:"is_owner"`
 	Services       []int64 `json:"services"`
 }
 
 func ValidateStaff(v *validator.Validator, s *Staff) {
-	// Name: required, 1–100 characters
 	v.Check(s.Name != "", "name", "must be provided")
 	v.Check(len(s.Name) <= 100, "name", "must not be more than 100 characters")
 
-	// Phone: required, basic format check (adjust regex as needed)
 	v.Check(s.Phone != "", "phone", "must be provided")
 	v.Check(validator.Matches(s.Phone, validator.PhoneRX), "phone", "must be a valid phone number")
 
-	// Email: required, format check
 	v.Check(s.Email != "", "email", "must be provided")
 	v.Check(validator.Matches(s.Email, validator.EmailRX), "email", "must be a valid email address")
 
-	// Services: optional, but if provided, ensure all IDs are positive
 	v.Check(len(s.Services) > 0, "services", "at least one service must be provided")
 	for i, id := range s.Services {
 		v.Check(id > 0, fmt.Sprintf("services[%d]", i), "must be a valid service ID")
@@ -119,7 +115,7 @@ func (m StaffModel) Insert(s *Staff) error {
 	return nil
 }
 
-func (m StaffModel) GetAllByProviderID(providerID int64) ([]*Staff, error) {
+func (m StaffModel) GetAllForProvider(providerID int64) ([]*Staff, error) {
 	query := `
 		SELECT id, name, phone, email, profile_picture, is_owner
 		FROM staff
